@@ -1,0 +1,330 @@
+---
+title: "Portfolio Analytics"
+output:
+  pdf_document: default
+  beamer_presentation:
+    latex_engine: xelatex
+  html_document:
+    df_print: paged
+header-includes:
+- \usepackage{booktabs}
+- \usepackage{adjustbox}
+- \usepackage{titling}
+- \pretitle{\begin{center}
+- \posttitle{\end{center}}
+---
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+\newpage
+```{r library, echo=F}
+########## RUNNING OF DATA SET############
+library(readxl)
+library(dplyr)
+library(PortfolioAnalytics)
+library(ROI)
+library(ROI.plugin.quadprog)
+library(ROI.plugin.glpk)
+library(NMOF)
+library(fPortfolio)
+library(knitr)
+
+data <- read_excel("/Users/tayzh/Downloads/BT2201Finance/ETFfxReturns.xlsx")
+fx <- read_excel("/Users/tayzh/Downloads/BT2201Finance/ETFfxReturns.xlsx", sheet = "FX")
+static <- read_excel("/Users/tayzh/Downloads/BT2201Finance/ETFfxReturns.xlsx", sheet = "Static")
+
+######ACCOUNTING FOR CURRENCY CONVERSION#########
+#adjustedR <- data %>% mutate(data[9] * fx[7])
+#adjustedR <- adjustedR %>% mutate(data[15] * fx[7])
+adjustedR <- data
+########Yearly Returns#######################
+market_returns <- xts(adjustedR[2], order.by = as.Date(adjustedR$x))
+names(market_returns) <- "Benchmark_Market"
+rf_returns <- xts(adjustedR[3], order.by = as.Date(adjustedR$x))
+log_market_returns <- apply.yearly(market_returns, Return.cumulative)
+index_returns <- xts(adjustedR[4:19], order.by = as.Date(adjustedR$x))
+log_index_returns <- apply.yearly(index_returns, Return.cumulative)
+
+tickers <- colnames(adjustedR[4:19])
+assets <- tickers
+log_assets_returns_ts <- as.timeSeries(log_index_returns)
+```
+
+# Instruments
+
+```{r instruments, echo=F}
+library(knitr)
+library(dplyr)
+library(kableExtra)
+AGG <- c("USD", "0.04%", "$1.12B", "Core US AGG", "4.01%", "3.88%", "-0.0666")
+SCHP <- c("USD", "0.05%", "$312.03M", "US TIPS","5.11%", "6.18%", "0.208")
+VCSH <- c("USD", "0.04%", "$519.52M", "US 1/5 Yr Corp","3.72%", "4.26%", "0.200")
+BNDX <- c("USD", "0.07%", "$166.61M", "BGA ex-USD H", "3.92%", "3.10%", "-0.0564")
+VWOB <- c("USD", "0.2%", "$36.52M", "USD EM GOVIES","8.24%", "10.1%", "0.495")
+J1306 <- c("JPY", "0.088%", "$2.13M", "TOPIX", "7.05%", "20.9%", "1.19")
+VOO <- c("USD", "0.03%", "$2.80B", "S&P500","11.1%", "17.2%", "1.69")
+VO <- c("USD", "0.04%", "$217.12M", "US MID CAP", "13.0%", "19.1%", "1.81")
+VSS<- c("USD", "0.07%", "$55.25M", "FTSE AC ex-US Small","11.9%", "24.4%", "1.79")
+VGK<- c("USD", "0.08%", "$591.66M", "FTSE EU", "8.35%", "19.9%", "1.77")
+VWO<- c("USD", "0.08%", "$902.58M", "FTSE EM", "13.9%", "27.8%", "2.04")
+J1343 <- c("JPY", "0.155%", "$550K", "JP REIT", "10.6%", "22.5%", "1.17")
+VNQ <- c("USD", "0.12%", "$587.83M", "MSCI REIT", "12.5%", "19.7%", "1.56")
+VNQI <- c("USD", "0.12%", "$17.39M", "S&P REIT", "11.1%", "24.3%", "1.69")
+IAU <- c("USD", "0.25%", "$17.39M", "Gold Bullion","9.92%", "14.7%", "0.299")
+BCI <- c("USD", "0.25%", "$12.37M", "S&P GSCI", "2.79%", "17.5%", "1.08")
+
+characteristics <- rbind(AGG, SCHP, VCSH, BNDX, VWOB, J1306, VOO, VO, VSS, VGK, VWO, J1343, VNQ, VNQI, IAU, BCI)
+colnames(characteristics) <- c("Currency", "Fees", "Liquidity", "Benchmark", "Mu", "Sigma", "Beta(FF5F)")
+rownames(characteristics) <- c("AGG US Equity", "SCHP US Equity", "VCSH US Equity", "BNDX US Equity", "VWOB US Equity", "1306 JT Equity", "VOO US Equity", "VO US Equity", "VSS US Equity", "VGK US Equity", "VWO US Equity", "1343 JT Equity", "VNQ US Equity", "VNQI US Equity", "IAU US Equity", "BCI US Equity")
+
+kable(characteristics, "latex", longtable = T, booktabs = T, align = "c") %>%
+  kable_styling(font_size = 7)
+```
+
+# Yearly Returns For Individual Equity
+
+```{r plots, echo=F}
+library(TSstudio)
+adjustedRD <- xts(adjustedR[2:19], order.by = as.Date(adjustedR$x))
+log_adjustedRD_returns <- apply.yearly(adjustedRD, Return.cumulative)
+
+chart.CumReturns(log_adjustedRD_returns, legend.loc = "topleft",colorset = c("black", "red","darkslategray", "aquamarine4", "gold1", "cornflowerblue", "bisque", "blue", "blueviolet", "lightpink2", "cadetblue", "chartreuse", "darkgoldenrod1", "deeppink", "mediumpurple1", "navy", "cyan", "coral", "darkseagreen"),ylab = "Cumulative Return", xlab = "Year", main="Cumulative Returns against Time")
+```
+\newpage
+
+## Efficient Frontier
+```{r efficientFrontier, echo =F}
+effFrontier <- portfolioFrontier(log_assets_returns_ts, constraints = "LongOnly")
+plot(effFrontier, c(1,2,3,4))
+#### LOW RISK PORTFOLIO ##########
+symbols(x=0.0284, y=0.0367, circles= 0.005,
+        add=T, inches=F, fg='red')
+text(x=0.06, y=0.0367, labels = "Low Risk Portfolio", pos=3, cex = 0.65)
+######### Tangency Portfolio #########
+#symbols(x=0.0284, y=0.0367, circles= 0.005,
+        #add=T, inches=F, fg='blue')
+
+######Medium Risk Portfolio###########
+points(0.0771, 0.08, col = "Red", pch=16, cex=1.5)
+symbols(x=0.0771, y=0.08, circles= 0.005,
+        add=T, inches=F, fg='red')
+text(x=0.115, y=0.075, labels = "Medium Risk Portfolio", pos=3, cex = 0.65)
+
+#######High Risk Portfolio############
+points(0.128, 0.111, col = "Red", pch=16, cex=1.5)
+symbols(x=0.128, y=0.111, circles= 0.005,
+        add=T, inches=F, fg='red')
+text(x=0.160, y=0.103, labels = "High Risk Portfolio", pos=3, cex = 0.65)
+```
+
+\newpage
+# Portfolios 
+Overview of our portfolios
+
+## Low Risk Portfolio
+
+``` {r low risk portfolio, echo=F}
+library(RColorBrewer)
+library(ggplot2)
+library(webr)
+library(ggrepel)
+library(kableExtra)
+########## Low Risk Portfolio AKA GLOBAL MIN VAR PORTFOLIO GMVP ##########
+min_var_portfolio <- PortfolioAnalytics::portfolio.spec(assets = assets)
+min_var_portfolio <- PortfolioAnalytics::add.constraint(
+  portfolio = min_var_portfolio,
+  type = "full_investment"
+)
+#min_var_portfolio <- PortfolioAnalytics::add.constraint(
+#  portfolio = min_var_portfolio,
+#  type = "box", min = 0.01, max = 0.85
+#)
+min_var_portfolio <- add.constraint(portfolio = min_var_portfolio, type = "long_only")
+min_var_portfolio <- PortfolioAnalytics::add.objective(
+  portfolio = min_var_portfolio,
+  # Minimize risk
+  type = "risk",
+  # A character corresponding to a function name, var()
+  name = "var"
+)
+global_min_portfolio <- PortfolioAnalytics::optimize.portfolio(
+  R = log_index_returns,
+  portfolio = min_var_portfolio,
+  # This defaults to the "quadprog" solver
+  optimize_method = "ROI",
+  search_size = 20000,
+  # Return additional information on the path or portfolios searched
+  trace = TRUE
+)
+
+##########Yearly returns & SD ###############
+lowpf_mean <- formatC(applyFUN(log_index_returns, extractWeights(global_min_portfolio), FUN = "mean", arguments = NULL), digits=3)
+lowpf_mean <- as.numeric(lowpf_mean) * 100
+lowpf_mean<-paste(lowpf_mean, '%', sep="")
+lowpf_sd <- formatC(applyFUN(log_index_returns, extractWeights(global_min_portfolio), FUN = "StdDev", arguments = NULL), digits = 3)
+lowpf_sd <- as.numeric(lowpf_sd) * 100
+lowpf_sd<-paste(lowpf_sd, '%', sep="")
+kable(cbind(lowpf_mean, lowpf_sd), col.names = c("Expected Yearly Return", "Risk"), caption = "Low Risk Portfolio", longtable = T, booktabs = T, align = "c") %>% kable_styling(full_width = F,position = "center")
+
+############# Weights ####################
+kable(formatC(global_min_portfolio$weights[c(1,3,4,6,7,16)]*100, digits = 3, flag = "#"), col.names = "Weights(%)", caption = "Weights for Low Risk Portfolio", longtable = T, booktabs = T, align = "c") %>% kable_styling(full_width = F, position = "float_right")
+
+lowRiskOptimisedPf <- Return.portfolio(
+  index_returns,
+  global_min_portfolio$weights,
+  rebalance_on = "quarters"
+)
+
+#######Donuts Graph ###############
+minpfweights <- as.data.frame(global_min_portfolio$weights[c(1,3,4,6,7,16)])
+colnames(minpfweights) <- "weights"
+
+colnames(lowRiskOptimisedPf) <- "Low Risk Portfolio"
+
+hsize <- 2
+
+minpfweights <- minpfweights %>% mutate(x = hsize)
+ggplot(minpfweights, aes(x = hsize, y = weights, fill = as.character(rownames(minpfweights)))) +
+  ggtitle("Allocation Of Securities In Low Risk Portfolio") +
+  geom_col(color = "black") +
+  coord_polar(theta = "y") + 
+  xlim(c(0.2, hsize + 0.5)) +
+  theme_void() +
+  scale_fill_brewer(palette = "Set3") +
+  #scale_fill_manual(values = c("azure", "azure1",
+                               #"azure2", "azure3", "azure4", "beige")) +
+  guides(fill = guide_legend(title = "Securities"))
+
+```
+
+\newpage
+## Medium Risk Portfolio
+
+``` {r med risk portfolio, echo = F}
+########## Medium Risk Portfolio##########
+### setting target risk and getting max return at that supposed risk level? or set target mean 
+med_risk <- portfolio.spec(assets = assets)
+med_risk <- add.objective(portfolio = med_risk, type = "return", name = "mean")
+med_risk <- add.objective(portfolio = med_risk, type = "risk", name = "StdDev", target = 0.08)
+med_risk <- add.constraint(portfolio = med_risk, type = "full_investment")
+med_risk <- add.constraint(portfolio = med_risk, type = "long_only")
+#med_risk <- add.constraint(portfolio = med_risk, type = "box", min = 0.01, max = 0.85)
+#med_risk <- add.constraint(portfolio = med_risk, type = "risk", name = "StdDev", multiplier = 0)
+#med_risk <- add.constraint(portfolio = med_risk, type = "group", 
+#                           groups = list(c(1:5), c(6:14), c(15:16)),
+#                           group_labels = c("Bonds", "Equities", "Commodities"),
+#                           group_min = c(0.5,0.38,0.12),
+#                           group_max = c(0.5,0.38,0.12))
+med_opt <- optimize.portfolio(log_index_returns, portfolio = med_risk, optimize_method = "ROI", search_size = 20000, trace = TRUE)
+
+##########Yearly returns & SD ###############
+medpf_mean <- formatC(applyFUN(log_index_returns, extractWeights(med_opt), FUN = "mean", arguments = NULL), digits = 3, flag = "#")
+medpf_sd <- formatC(applyFUN(log_index_returns, extractWeights(med_opt), FUN = "StdDev", arguments = NULL), digits = 3, flag = "#")
+medpf_mean <- as.numeric(medpf_mean) * 100
+medpf_mean<-paste(medpf_mean, '%', sep="")
+medpf_sd <- as.numeric(medpf_sd) * 100
+medpf_sd <-paste(medpf_sd, '%', sep="")
+kable(cbind(medpf_mean, medpf_sd), col.names = c("Expected Yearly Return", "Risk"), caption = "Medium Risk Portfolio", longtable = T, booktabs = T, align = "c")
+
+######Weights##########
+kable(formatC(med_opt$weights[c(4,7,8,12,13,15)] *100, digits = 3, flag = "#"), col.names = "Weights(%)", caption = "Weights for Medium Risk Portfolio", longtable = T, booktabs = T, align = "c") %>% kable_styling(full_width = F, position = "float_right")
+
+medRiskOptimisedPf <- Return.portfolio(
+  index_returns,
+  med_opt$weights,
+  rebalance_on = "quarters"
+)
+
+####Donuts ###########
+medpfweights <- as.data.frame(med_opt$weights[c(4,7,8,12,13,15)])
+colnames(medpfweights) <- "weights"
+
+colnames(medRiskOptimisedPf) <- "Medium Risk Portfolio"
+
+hsize <- 2
+
+medpfweights <- medpfweights %>% mutate(x = hsize)
+ggplot(medpfweights, aes(x = hsize, y = weights, fill = as.character(rownames(medpfweights)))) +
+  ggtitle("Allocation Of Securities In Medium Risk Portfolio") +
+  geom_col(color = "black") +
+  coord_polar(theta = "y") + 
+  xlim(c(0.2, hsize + 0.5)) +
+  theme_void() +
+  scale_fill_brewer(palette = "Set3") +
+  #scale_fill_manual(values = c("azure", "azure1",
+                               #"azure2", "azure3", "azure4", "beige")) +
+  guides(fill = guide_legend(title = "Securities"))
+colnames(medRiskOptimisedPf) <- "Medium Risk Portfolio"
+
+
+```
+
+\newpage
+## High Risk Portfolio
+
+``` {r high risk pf, echo = F}
+high_risk <- portfolio.spec(assets = assets)
+high_risk <- add.objective(portfolio = high_risk, type = "return", name = "mean")
+high_risk <- add.objective(portfolio = high_risk, type = "risk", name = "StdDev")
+high_risk <- add.constraint(portfolio = high_risk, type = "full_investment")
+high_risk <- add.constraint(portfolio = high_risk, type = "long_only")
+#high_risk <- add.constraint(portfolio = high_risk, type = "box", min = 0.01, max = 0.85)
+#high_risk <- add.constraint(portfolio = high_risk, type = "group", 
+#                           groups = list(c(1:5), c(6:14), c(15:16)),
+#                           group_labels = c("Bonds", "Equities", "Commodities"),
+#                           group_min = c(0.25,0.7,0.05),
+#                           group_max = c(0.25,0.7,0.05))
+high_opt <- optimize.portfolio(log_index_returns, portfolio = high_risk, optimize_method = "ROI", search_size = 20000, trace = TRUE)
+
+############ Yearly Returns & SD #################
+highpf_mean <- formatC(applyFUN(log_index_returns, extractWeights(high_opt), FUN = "mean", arguments = NULL), digits = 3, flag = "#")
+highpf_mean <- as.numeric(highpf_mean) * 100
+highpf_mean<-paste(highpf_mean, '%', sep="")
+highpf_sd <- formatC(applyFUN(log_index_returns, extractWeights(high_opt), FUN = "StdDev", arguments = NULL), digits = 3, flag = "#")
+highpf_sd <- as.numeric(highpf_sd) * 100
+highpf_sd<-paste(highpf_sd, '%', sep="")
+kable(cbind(highpf_mean, highpf_sd), col.names = c("Expected Yearly Returns", "Risk"), caption = "High Risk Portfolio",longtable = T, booktabs = T, align = "c")
+
+############# Weights ##################
+kable(formatC(high_opt$weights[c(8,13,15)]*100, digits = 3, flag = "#"), col.names = "Weights(%)", caption = "Weights for High Risk Portfolio", longtable = T, booktabs = T, align = "c")
+
+highRiskOptimisedPf <- Return.portfolio(
+  index_returns,
+  high_opt$weights,
+  rebalance_on = "quarters"
+)
+
+########Donuts Chart #################
+highpfweights <- as.data.frame(high_opt$weights[c(8,13,15)])
+colnames(highpfweights) <- "weights"
+
+colnames(highRiskOptimisedPf) <- "High Risk Portfolio"
+
+hsize <- 2
+
+highpfweights <- highpfweights %>% mutate(x = hsize)
+ggplot(highpfweights, aes(x = hsize, y = weights, fill = as.character(rownames(highpfweights)))) +
+  ggtitle("Allocation Of Securities In High Risk Portfolio") +
+  geom_col(color = "black") +
+  coord_polar(theta = "y") + 
+  xlim(c(0.2, hsize + 0.5)) +
+  theme_void() +
+  scale_fill_brewer(palette = "Set3") +
+  #scale_fill_manual(values = c("azure", "azure1",
+                               #"azure2", "azure3", "azure4", "beige")) +
+  guides(fill = guide_legend(title = "Securities"))
+colnames(highRiskOptimisedPf) <- "High Risk Portfolio"
+```
+
+\newpage
+# Backtest
+
+``` {r backtesting, echo = F}
+charts.PerformanceSummary(merge(market_returns, lowRiskOptimisedPf, medRiskOptimisedPf, highRiskOptimisedPf), main = "Overall P/L From 2001-Oct till Present")
+#par(mar=c(5,5.2,4,1)+.1)
+#charts.PerformanceSummary(merge(market_returns, lowRiskOptimisedPf), main = "Overall P/L of Low Risk Portfolio From 2001-Oct till Present")
+#charts.PerformanceSummary(merge(market_returns, medRiskOptimisedPf), main = "Overall P/L of Medium Risk Portfolio From 2001-Oct till Present")
+#charts.PerformanceSummary(merge(market_returns, highRiskOptimisedPf), main = "Overall P/L of High Risk Portfolio From 2001-Oct till Present")
+```
