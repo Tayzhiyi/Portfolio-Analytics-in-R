@@ -1,2 +1,2 @@
 # Portfolio-Analytics-in-R
-Portfolio Analytics Using R
+Utilising R to build 3 different portfolios based on low, medium and high risk, including backtesting
